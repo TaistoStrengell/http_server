@@ -2,10 +2,13 @@
 #define THREADPOOL_H
 #include <stdbool.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 typedef struct {
     void (*function)(void *);
-    void *argument;
+    int fd;
+    struct sockaddr_in6 client_addr;
 } threadpool_task_t;
 
 typedef struct {
@@ -23,7 +26,6 @@ typedef struct {
 } threadpool_t;
 
 threadpool_t *threadpool_create(int thread_count, int queue_size);
-int threadpool_add(threadpool_t *pool, void (*function)(void *), void *argument);
 int threadpool_destroy(threadpool_t *pool);
-
+int threadpool_add(threadpool_t *pool, void (*function)(void *), int fd, struct sockaddr_in6 addr);
 #endif

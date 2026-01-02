@@ -1,14 +1,66 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include "threadpool.h"
+#include "http_handler.h"
 
-void main(){
-    int sock_ipv4 = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_ipv4 < 0) { perror("IPv4 socket fail"); return 1; }
+#define PORT 8080
 
+int main() {
+    int sockfd;
+    struct sockaddr_in6 server_addr;
+    int off = 0; //IPV6_V6ONLY option set to 0 to allow both IPv4 and IPv6
+
+    // init socket
+    sockfd = socket(AF_INET6, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("creating a socket failed");
+        exit(1);
+    }
+
+    //change optname to 0
+    if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&off, sizeof(off)) < 0) {
+        perror("setsockopt IPV6_V6ONLY failed");
+        close(sockfd);
+        exit(1);
+    }
+    memset(&server_addr, 0, sizeof(server_addr));
+
+    server_addr.sin6_family = AF_INET6;
+    server_addr.sin6_port = htons(PORT); 
+    server_addr.sin6_addr = in6addr_any;
+
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    perror("bind epäonnistui");
+    close(sockfd);
+    exit(1);
+    }
+    if (listen(sockfd, 10) < 0) {
+        perror("listen failed");
+        close(sockfd);
+        exit(1);
+    }
+
+threadpool_t *pool = threadpool_create(4, 100);
+
+    while (1) {
+        // buffer for client address
+        struct sockaddr_in6 client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+
+        // accept() luo uuden tiedostokahvan (newsock)
+        int client_fd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_len);
     
-    setsockopt(sock_ipv4, SOL_SOCKET, SO_REUSEADDR, 1, sizeof(int));
-    
-    int sock_ipv6 = socket(AF_INET6, SOCK_STREAM, 0);
-    if (sock_ipv6 < 0) { perror("IPv6 socket fail"); return 1; }
-
-    setsockopt(sock_ipv6, SOL_SOCKET, SO_REUSEADDR, 1, sizeof(int));
+        if (client_fd < 0) {
+            perror("accept failed");
+            continue;
+        }
+    }
+    threadpool_destroy(pool);
+    close(sockfd);
+    return 0;
 }

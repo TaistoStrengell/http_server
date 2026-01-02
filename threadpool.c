@@ -29,44 +29,34 @@ static void *thread_function(void *threadpool) {
 
         pthread_mutex_unlock(&(pool->lock));
 
-        (*(task.function))(task.argument);
+        (*(task.function))(&task);
     }
 
     return NULL;
 }
 
 
-
 /*
     Allocatees memory and initializes a thread pool, if succesful returns a pointer to the newly created thread pool. NULL on failure.
 */
-threadpool_t *threadpool_create(int thread_count, int queue_size){
-    threadpool_t *pool;
-    int i;
-
+threadpool_t *threadpool_create(int thread_count, int queue_size) {
     if (thread_count <= 0 || queue_size <= 0) {
         return NULL;
     }
 
-    pool = (threadpool_t *)malloc(sizeof(threadpool_t));
+    threadpool_t *pool = (threadpool_t *)calloc(1, sizeof(threadpool_t));
     if (pool == NULL) {
         return NULL;
     }
 
-    pool->thread_count = 0;
     pool->queue_size = queue_size;
-    pool->head = 0;
-    pool->tail = 0;
-    pool->count = 0;
-    pool->shutdown = false;
-    pool->started = 0;
 
-    pool->threads = (pthread_t *)malloc(sizeof(pthread_t) * thread_count);
-    pool->queue = (threadpool_task_t *)malloc(sizeof(threadpool_task_t) * queue_size);
+    pool->threads = (pthread_t *)calloc(thread_count, sizeof(pthread_t));
+    pool->queue = (threadpool_task_t *)calloc(queue_size, sizeof(threadpool_task_t));
 
-    if ((pool->threads == NULL) || (pool->queue == NULL)) {
-        if (pool->threads){free(pool->threads);}
-        if (pool->queue){free(pool->queue);}
+    if (pool->threads == NULL || pool->queue == NULL) {
+        free(pool->threads);
+        free(pool->queue);
         free(pool);
         return NULL;
     }
@@ -75,7 +65,6 @@ threadpool_t *threadpool_create(int thread_count, int queue_size){
         free(pool->threads);
         free(pool->queue);
         free(pool);
-        perror("Mutex init failed");
         return NULL;
     }
     
@@ -84,13 +73,10 @@ threadpool_t *threadpool_create(int thread_count, int queue_size){
         free(pool->threads);
         free(pool->queue);
         free(pool);
-        perror("Cond init failed");
         return NULL;
     }
 
-    
-
-    for (i = 0; i < thread_count; i++) {
+    for (int i = 0; i < thread_count; i++) {
         if (pthread_create(&(pool->threads[i]), NULL, thread_function, (void*)pool) != 0) {
             threadpool_destroy(pool);
             return NULL;
@@ -104,7 +90,7 @@ threadpool_t *threadpool_create(int thread_count, int queue_size){
 /*
     Adds a new task to the queue. Returns 0 if succesful, -1 otherwise.
 */
-int threadpool_add(threadpool_t *pool, void (*function)(void *), void *argument) {
+int threadpool_add(threadpool_t *pool, void (*function)(void *), int fd, struct sockaddr_in6 addr) {
     if (pool == NULL || function == NULL) {
         return -1;
     }
@@ -117,10 +103,10 @@ int threadpool_add(threadpool_t *pool, void (*function)(void *), void *argument)
     }
 
     pool->queue[pool->tail].function = function;
-    pool->queue[pool->tail].argument = argument;
+    pool->queue[pool->tail].fd = fd;
+    pool->queue[pool->tail].client_addr = addr; 
     
     pool->tail = (pool->tail + 1) % pool->queue_size; 
-    
     pool->count++;
 
     pthread_cond_signal(&(pool->notify));
