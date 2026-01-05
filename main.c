@@ -7,10 +7,13 @@
 #include <netinet/in.h>
 #include "threadpool.h"
 #include "http_handler.h"
+#include <signal.h>
 
 #define PORT 8080
 
 int main() {
+    signal(SIGPIPE, SIG_IGN);
+
     int sockfd;
     struct sockaddr_in6 server_addr;
     int off = 0; //IPV6_V6ONLY option set to 0 to allow both IPv4 and IPv6
@@ -48,19 +51,29 @@ int main() {
 threadpool_t *pool = threadpool_create(4, 100);
 
     while (1) {
-        // buffer for client address
+        //buffer asiakkaan tiedoille
         struct sockaddr_in6 client_addr;
         socklen_t addr_len = sizeof(client_addr);
 
-        // accept() luo uuden tiedostokahvan (newsock)
-        int client_fd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_len);
+        int client_fd = accept4(sockfd, (struct sockaddr *)&client_addr, &addr_len, SOCK_CLOEXEC);
     
         if (client_fd < 0) {
             perror("accept failed");
             continue;
         }
+
+        // Paketoidaan tiedot structiin säiettä varten, periaatteessa taas buffer
+        conn_info_t conn;
+        conn.fd = client_fd;
+        conn.addr = client_addr;
+
+        if (threadpool_add(pool, handle_http_request, &conn, sizeof(conn_info_t)) != 0) {
+            fprintf(stderr, "Failed to add, queue might be full\n");
+            close(client_fd);
+        }
     }
     threadpool_destroy(pool);
     close(sockfd);
+    printf("Server shut down.\n");
     return 0;
 }

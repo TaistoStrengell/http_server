@@ -2,14 +2,15 @@
 #define THREADPOOL_H
 #include <stdbool.h>
 #include <pthread.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <stddef.h>
+
+#define TASK_DATA_SIZE 64
 
 typedef struct {
     void (*function)(void *);
-    int fd;
-    struct sockaddr_in6 client_addr;
+    char arg_data[TASK_DATA_SIZE];
 } threadpool_task_t;
+
 
 typedef struct {
     pthread_mutex_t lock;
@@ -27,5 +28,5 @@ typedef struct {
 
 threadpool_t *threadpool_create(int thread_count, int queue_size);
 int threadpool_destroy(threadpool_t *pool);
-int threadpool_add(threadpool_t *pool, void (*function)(void *), int fd, struct sockaddr_in6 addr);
+int threadpool_add(threadpool_t *pool, void (*function)(void *), void *arg, size_t arg_size);
 #endif

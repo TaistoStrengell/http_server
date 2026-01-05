@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 
 
 /*
@@ -22,19 +23,22 @@ static void *thread_function(void *threadpool) {
             pthread_exit(NULL);
         }
 
+       
         threadpool_task_t task = pool->queue[pool->head];
 
         pool->head = (pool->head + 1) % pool->queue_size;
         pool->count--;
 
+        // Free the lock before executing the task
         pthread_mutex_unlock(&(pool->lock));
 
-        (*(task.function))(&task);
+        if (task.function != NULL) {
+            (*(task.function))(task.arg_data);
+        }
     }
 
     return NULL;
 }
-
 
 /*
     Allocatees memory and initializes a thread pool, if succesful returns a pointer to the newly created thread pool. NULL on failure.
@@ -90,8 +94,8 @@ threadpool_t *threadpool_create(int thread_count, int queue_size) {
 /*
     Adds a new task to the queue. Returns 0 if succesful, -1 otherwise.
 */
-int threadpool_add(threadpool_t *pool, void (*function)(void *), int fd, struct sockaddr_in6 addr) {
-    if (pool == NULL || function == NULL) {
+int threadpool_add(threadpool_t *pool, void (*function)(void *), void *arg, size_t arg_size) {
+    if (pool == NULL || function == NULL || arg_size > TASK_DATA_SIZE) {
         return -1;
     }
 
@@ -103,18 +107,20 @@ int threadpool_add(threadpool_t *pool, void (*function)(void *), int fd, struct 
     }
 
     pool->queue[pool->tail].function = function;
-    pool->queue[pool->tail].fd = fd;
-    pool->queue[pool->tail].client_addr = addr; 
+    
+    if (arg != NULL && arg_size > 0) {
+        memcpy(pool->queue[pool->tail].arg_data, arg, arg_size);
+    }
     
     pool->tail = (pool->tail + 1) % pool->queue_size; 
     pool->count++;
 
     pthread_cond_signal(&(pool->notify));
-
     pthread_mutex_unlock(&(pool->lock));
 
     return 0;
 }
+
 
 /*
     Destroys the thread pool. Returns 0 if succesful, -1 otherwise.

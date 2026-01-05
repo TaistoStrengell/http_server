@@ -1,46 +1,62 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/stat.h>
+#include <sys/stat.h> 
+#include <sys/socket.h>
+#include <sys/sendfile.h> 
+#include <errno.h>
+
 #include "http_handler.h"
 
-void serve_file(int client_fd, const char *path) {
-    // Lisätään polun eteen juurihakemisto (esim. ./www) tietoturvan takia
-    char full_path[512];
-    snprintf(full_path, sizeof(full_path), "./www%s", path);
-
-    // Tarkistetaan tiedoston tiedot (onko olemassa, koko)
+void handle_http_request(void *arg) {
+    conn_info_t *conn = (conn_info_t *)arg;
+    int client_fd = conn->fd;
+    const char *filename = "test_file";
     struct stat st;
-    if (stat(full_path, &st) < 0 || !S_ISREG(st.st_mode)) {
-        const char *not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found";
-        send(client_fd, not_found, strlen(not_found), 0);
+
+    if (stat(filename, &st) != 0) {
+        perror("Failed to get file status");
+        close(client_fd);
         return;
     }
 
-    int file_fd = open(full_path, O_RDONLY);
-    if (file_fd < 0) {
-        // 500 Internal Server Error jos tiedostoa ei saada auki
-        return; 
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        perror("Failed to open file");
+        close(client_fd);
+        return;
     }
 
-    // Lähetetään HTTP-headerit
-    char header[256];
-    int header_len = snprintf(header, sizeof(header),
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: %lld\r\n"
-        "Connection: close\r\n\r\n", 
-        (long long)st.st_size);
-    send(client_fd, header, header_len, 0);
+    char http_header[256];
+    int header_length = snprintf(http_header, sizeof(http_header),
+                                 "HTTP/1.1 200 OK\r\n"
+                                 "Content-Type: application/octet-stream\r\n"
+                                 "Content-Length: %ld\r\n"
+                                 "Connection: close\r\n"
+                                 "\r\n", (long)st.st_size);
 
-    // Lähetetään tiedoston sisältö puskuroidusti
-    char file_buffer[4096];
-    ssize_t n;
-    while ((n = read(file_fd, file_buffer, sizeof(file_buffer))) > 0) {
-        send(client_fd, file_buffer, n, 0);
+    if (header_length < 0 || (size_t)header_length >= sizeof(http_header)) {
+        fprintf(stderr, "Header too large or error\n");
+        close(fd);
+        close(client_fd);
+        return;
     }
 
-    close(file_fd);
+    if (send(client_fd, http_header, header_length, 0) < 0) {
+        perror("Failed to send HTTP header");
+        close(fd);
+        close(client_fd);
+        return;
+    }
+
+    off_t offset = 0;
+    ssize_t sent_bytes = sendfile(client_fd, fd, &offset, st.st_size);
+    
+    if (sent_bytes < 0) {
+        perror("sendfile failed");
+    }
+
+    close(fd);
+    close(client_fd);
 }
