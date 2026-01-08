@@ -5,9 +5,10 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <signal.h>
+
 #include "threadpool.h"
 #include "http_handler.h"
-#include <signal.h>
 
 #define PORT 8080
 
@@ -16,64 +17,60 @@ int main() {
 
     int sockfd;
     struct sockaddr_in6 server_addr;
-    int off = 0; //IPV6_V6ONLY option set to 0 to allow both IPv4 and IPv6
+    int off = 0;
 
-    // init socket
     sockfd = socket(AF_INET6, SOCK_STREAM, 0);
     if (sockfd < 0) {
         perror("creating a socket failed");
         exit(1);
     }
 
-    //change optname to 0
     if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&off, sizeof(off)) < 0) {
         perror("setsockopt IPV6_V6ONLY failed");
         close(sockfd);
         exit(1);
     }
-    memset(&server_addr, 0, sizeof(server_addr));
 
+    memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin6_family = AF_INET6;
     server_addr.sin6_port = htons(PORT); 
     server_addr.sin6_addr = in6addr_any;
 
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-    perror("bind epäonnistui");
-    close(sockfd);
-    exit(1);
+        perror("bind failed");
+        close(sockfd);
+        exit(1);
     }
+
     if (listen(sockfd, 10) < 0) {
         perror("listen failed");
         close(sockfd);
         exit(1);
     }
 
-threadpool_t *pool = threadpool_create(4, 100);
+    threadpool_t *pool = threadpool_create(4, 100);
 
     while (1) {
-        //buffer asiakkaan tiedoille
         struct sockaddr_in6 client_addr;
         socklen_t addr_len = sizeof(client_addr);
 
-        int client_fd = accept4(sockfd, (struct sockaddr *)&client_addr, &addr_len, SOCK_CLOEXEC);
+        int client_fd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_len);
     
         if (client_fd < 0) {
             perror("accept failed");
             continue;
         }
 
-        // Paketoidaan tiedot structiin säiettä varten, periaatteessa taas buffer
-        conn_info_t conn;
-        conn.fd = client_fd;
-        conn.addr = client_addr;
+        int conn;
+        conn = client_fd;
 
-        if (threadpool_add(pool, handle_http_request, &conn, sizeof(conn_info_t)) != 0) {
+        if (threadpool_add(pool, handle_http_request, &conn, sizeof(int)) != 0) {
             fprintf(stderr, "Failed to add, queue might be full\n");
             close(client_fd);
         }
     }
+
     threadpool_destroy(pool);
     close(sockfd);
-    printf("Server shut down.\n");
     return 0;
 }
