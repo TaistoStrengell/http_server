@@ -6,13 +6,22 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <errno.h>
 
 #include "threadpool.h"
 #include "http_handler.h"
 
 #define PORT 8080
 
+volatile sig_atomic_t server_running = 1;
+
+void handle_sigint(int sig) {
+    (void)sig;
+    server_running = 0; 
+}
+
 int main() {
+    signal(SIGINT, handle_sigint);
     signal(SIGPIPE, SIG_IGN);
 
     int sockfd;
@@ -47,16 +56,23 @@ int main() {
         close(sockfd);
         exit(1);
     }
+    struct timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     threadpool_t *pool = threadpool_create(4, 100);
 
-    while (1) {
+    while (server_running) {
         struct sockaddr_in6 client_addr;
         socklen_t addr_len = sizeof(client_addr);
 
         int client_fd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_len);
     
         if (client_fd < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR){
+                continue;
+            }
             perror("accept failed");
             continue;
         }
